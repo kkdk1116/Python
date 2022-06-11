@@ -11,61 +11,65 @@ import torch
 from torch import tensor
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-import torch.nn as nn
-import torch.optim as optim
+import torch.nn as nn # 노드 수와 층 수를 결정할 수 있는 라이브러리
+import torch.optim as optim # loss함수 (error) 를 정의할 수 있는 라이브러리, 주로 MSE함수를 사용했음
 from torch.utils.data import Dataset # 가장 중요한 라이브러리
-import matplotlib.pyplot as plt # 그래픽 라이브러리 중요함! 사용법 따로 공부해야하는 듯 시험에 나올수도 있음
+import matplotlib.pyplot as plt # 그래픽 라이브러리 중요함! 사용법 따로 공부해야하는 듯 시험에 나올수도 있음, 그림그리기 툴
+import random
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu' # 테스트를 해서 gpu(그래픽카드) 존재하면 cuda, 아니면 cpu
 #torch.manual_seed(777) # 랜덤넘버에 사용, 랜덤의 시작위치, 777부터 사용, 보통 777자리에 타이머를 사용함, 실습할때는 안 하는게 좋음, 현장에서 사용하자.
 if device == 'cuda':
-    torch.cuda.manual_seed_all(777)
+    torch.cuda.manual_seed_all(777) # 중요하지는 않음, 무시하자
 print(device + " is using")
 
-training_data = datasets.MNIST("data", train=True, download=True, transform=ToTensor()) # 6만개 존재, 점 데이터를 텐서형태로 변환해서 가져옴, 배열과 텐서는 다름 (차이점 주의)
+# 이미지 그 자체
+training_data = datasets.MNIST("data", train=True, download=True, transform=ToTensor()) # 6만개 존재, 점 데이터를 텐서형태로 변환해서 가져옴, 배열과 텐서는 다름 (차이점 주의) 784바이트가 아니라 784텐서(2차원으로)가 쭉 들어온다
 test_data = datasets.MNIST("data", train=False, download=True, transform=ToTensor()) # 1만개 존재, 테스트이므로  train=False, 점 데이터를 텐서형태로 변환해서 가져옴, 배열과 텐서는 다름 (차이점 주의)
 
-trainLoader = torch.utils.data.DataLoader(training_data, batch_size=100, shuffle=True, drop_last=False) # 6만자중에 100개씩 GPU에 던져줌, 100개를 섞어서 던짐(shuffle), 100개씩 자르고 남은 자투리를 버린다. 60050개이면 50개를 버림(drop_last=Flase)
-testLoader = torch.utils.data.DataLoader(test_data, batch_size=100, shuffle=True, drop_last=False) # 1만자중에 100개씩 GPU에 던져줌, 100개를 섞어서 던짐(shuffle), 100개씩 자르고 남은 자투리를 버린다. 10050개이면 50개를 버림(drop_last=Flase)
+# 100개씩 묶은, 한차원 더 높은 집단
+trainLoader = torch.utils.data.DataLoader(training_data, batch_size=100, shuffle=False, drop_last=False) # 6만자중에 100개씩 GPU에 던져줌, 100개를 섞어서 던짐(shuffle), 학습, 개발할때는 셔플을 false로 하는게 좋다.(디버깅 편리) 100개씩 자르고 남은 자투리를 버린다. 60050개이면 50개를 버림(drop_last=Flase), linked list로 6만자가 붙어있음, 노드에 100개씩(한번에 처리하는 단위)
+testLoader = torch.utils.data.DataLoader(test_data, batch_size=100, shuffle=False, drop_last=False) # 1만자중에 100개씩 GPU에 던져줌, 100개를 섞어서 던짐(shuffle), 학습, 개발할때는 셔플을 false로 하는게 좋다.(디버깅 편리) 100개씩 자르고 남은 자투리를 버린다. 10050개이면 50개를 버림(drop_last=Flase)
 
 
-#init (네트워크생성) 와 forward (액션) 두 부분으로 나눔
+#init (네트워크생성) 와 forward (액션) 두 부분으로 나눔, 파이썬은 init와 forward가 필수
 
-class network(nn.Module):  # 네트워크 모델 정의
-    def __init__(self):
+class network(nn.Module):  # 네트워크 모델 정의 nn.Module에서 상속받음
+    def __init__(self): # 생성자(초기화) 함수
         super(network, self).__init__()
         self.conv = nn.Sequential( # Sequential 묶인 부분 차례로 실행
-            nn.Conv2d(1, 6, (3, 3), padding=1),   # in_channels = 1, out_channels = 6, kernel_size = 3       output = 28 * 28 * 6   Convoluton 단계, 1개의 그림, 6개의 필터(3x3), 패딩=1
+            nn.Conv2d(1, 6, (3, 3), padding=1),   # in_channels = 1, out_channels = 6, kernel_size = 3       output = 28 * 28 * 6   Convoluton 단계, 1개의 그림, 6개의 필터(3x3), 패딩=1,  Convolution 1, (5x5면 패딩=2)
             nn.ReLU(),                            # 값은 유지, 음수만 없애줌
             nn.MaxPool2d(2, 2),                   # max 풀링  kernel_size = 2, stride = 2                     output = 14 * 14 * 6   2x2, 스트라이브가 2 -> 사이즈가 2배 줄어듬
-            nn.Conv2d(6, 16, (3, 3), padding=1),  # in_channels = 6, out_channels = 16, kernel_size = 3      output = 14 * 14 * 16  Convoluton 단계, 6개의 그림, 필터를 16개로 적용(3x3), 패딩=1, 인풋 6개 아웃풋 16개
+            nn.Conv2d(6, 16, (3, 3), padding=1),  # in_channels = 6, out_channels = 16, kernel_size = 3      output = 14 * 14 * 16  Convoluton 단계, 6개의 그림, 필터를 16개로 적용(3x3), 패딩=1, 인풋 6개, 아웃풋 16개
             nn.ReLU(),                            # 값은 유지, 음수만 없애줌
-            nn.MaxPool2d(2, 2)                    # max 풀링  kernel_size = 2, stride = 2                     output =  7 *  7 * 16
+            nn.MaxPool2d(2, 2)                    # max 풀링  kernel_size = 2, stride = 2                     output =  7 *  7 * 16   800개의 픽셀이 2차원으로 연결되있음
         )
         # torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros', device=None, dtype=None)
         # torch.nn.MaxPool2d( kernel_size , stride = None , padding = 0 , dilation = 1 , return_indices = False , ceil_mode = False )
 
-        self.fully_connected = nn.Sequential(  # Sequential 묶인 부분 차례로 실행
-            nn.Linear(16 * 7 * 7, 120),  # 1층 레이어 7x7 영상이 16개, 120개 노드를 뿌림 (H1DIM)
-            nn.Linear(120, 84),          # 2층 레이어
-            nn.Linear(84, 10)            # 3층 레이어
+        self.fully_connected = nn.Sequential(  # Sequential 묶인 부분 차례로 실행 (3개의 동작을 하나의 동작처럼 처리)
+            nn.Linear(16 * 7 * 7, 120),  # 1층 레이어, 7x7 영상이 16개, 120개 노드를 뿌림 (H1DIM) , 
+            nn.Linear(120, 84),          # 2층 레이어, 84개 노드를 뿌림 (H2DIM) 
+            nn.Linear(84, 10)            # 3층 레이어, 10개 노드를 뿌림 (H3DIM)
         )
 
-    def forward(self, x):
-        x = self.conv(x)
-        x = x.view(-1, 16 * 7 * 7)  # 1차원 전환  (nn.flatten) ,16개를 1차원으로 쫙 펼침 (7x7을 16개로 쫙 펼침)
-        x = self.fully_connected(x)
+    def forward(self, x): # 멤버(키워드)함수
+        x = self.conv(x) # 네모난것이 16개 2차원으로 연결
+        x = x.view(-1, 16 * 7 * 7)  # 1차원 전환  (nn.flatten) ,16개를 1차원으로 쫙 펼침 (7x7을 16개로 쫙 펼침), 1차원으로 변경됨
+        x = self.fully_connected(x) # x는 10차원이 나옴
         return x
 
 
 def train():
     for epoch in range(Epochs):
-        loss_sum = 0
-        for data, target in trainLoader:
-            X, y = data.to(device), target.to(device)  # cross
-            optimizer.zero_grad()
-            prediction = model(X)  # 결과 출력
-            loss = criterion(prediction, y)  # cross 로스 계산
+        loss_sum = 0 # 
+        for data, target in trainLoader: # 트레인 데이터 6만개를 100개씩 쪼개서 학습 
+            X, y = data.to(device), target.to(device)  # cross, 100개 데이터를 X, y에 저장  (device)는 cpu에서 gpu로 던져주는 작업, cpu에서 할꺼면 (device)는 빼도 됨
+            optimizer.zero_grad() # 기울기 초기화
+            prediction = model(X)  # 결과 출력, 인스턴스생성하면서 x를 넣으면 forward에 자동으로 x가 들어감, 결과가 100x10개 나옴
+            loss = criterion(prediction, y)  # cross 로스 계산, 타겟과 결과 100개를 비교
             loss.backward()  # 로스 역전파
             optimizer.step()  # 실질적 웨이트 수정
             loss_sum += loss.item()
@@ -76,9 +80,9 @@ def train():
 def test():
     correct = 0
     with torch.no_grad():
-        for data, target in testLoader:
+        for data, target in testLoader: # 데이터를 테스트로더로
             data, target = data.to(device), target.to(device)
-            outputs = model(data)  # 출력 계산
+            outputs = model(data)  # 출력 계산, 모델에다 테스트 넣은 것이 결과값
 
             # 추론 계산
             _, predicted = torch.max(outputs, 1)  # 가장 큰 인덱스 위치를 리턴함  @ return value, index
@@ -87,10 +91,10 @@ def test():
     data_num = len(test_data)  # 데이터 총 건수
     print("accuracy = {}/10000\n".format(correct))
 
-
+# 여기서부터 출력값을 출력하는 부분
 model = network().to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001) # 그레디언트 디센트와 유사하지만 좀 더 빠름
+criterion = nn.CrossEntropyLoss() # 그동안 MSE를 사용했지만 분류모델 같은 경우에는 CrossEntropyLoss()를 사용하는게 좀 더 효율은 좋음, MSE를 써도 성능이 조금 낮을 뿐 돌아감
 
 Epochs = 2
 batch_count = len(trainLoader)
